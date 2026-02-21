@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anvil - Evidence-First Coding Agent for GitHub Copilot CLI</title>
+    <meta name="description" content="Anvil is a chat mode for GitHub Copilot CLI that verifies code before presenting it. Multi-model adversarial review, SQL-tracked verification, and automatic rollback.">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔨</text></svg>">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container header-container">
+            <a href="#" class="logo">Anvil<span class="logo-gradient">.</span></a>
+            <nav class="main-nav">
+                <a href="#install" class="nav-cta">Install</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+
+        <!-- ── Hero ──────────────────────────────────── -->
+        <section class="hero">
+            <p class="hero-kicker">A chat mode for GitHub Copilot CLI</p>
+            <h1>Your agent should prove<br>its work. <span class="gradient-text">This one does.</span></h1>
+            <p class="hero-sub">
+                Anvil verifies every change before you see it - builds, tests, lints, 
+                then has other AI models try to break it. You get proof, not promises.
+            </p>
+            <div class="install-block">
+                <div class="terminal-box" onclick="copyInstall(this)" title="Click to copy">
+                    <span class="prompt">$</span>
+                    <code>copilot agent install burkeholland/anvil</code>
+                    <button class="copy-btn" aria-label="Copy to clipboard">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                        </svg>
+                    </button>
+                </div>
+                <p class="context-note"><strong>~5K tokens.</strong> The agent file is long because verification rules need to be explicit - vague instructions get skipped. A short prompt that hallucinates results costs more in retries than a thorough one that gets it right the first time. On a 200K context model, this is about 2.5%.</p>
+            </div>
+        </section>
+
+        <!-- ── The Problem ───────────────────────────── -->
+        <section class="section">
+            <h2 class="editorial-heading">The problem with AI agents today is they lie to you.</h2>
+            <div class="editorial-body">
+                <p>They write code and say "Done!" They claim the build passes without running it. They hallucinate test results. They never push back on a bad idea. And when something breaks in production, it's your fault - not theirs.</p>
+                <p>We got tired of it.</p>
+            </div>
+        </section>
+
+        <!-- ── What Anvil Does ───────────────────────── -->
+        <section class="section" id="features">
+            <span class="section-label">What Anvil Does</span>
+
+            <div class="feature-list">
+                <div class="feature-row">
+                    <h3 class="feature-name">Adversarial Review</h3>
+                    <p class="feature-desc">Every change gets reviewed by up to 3 different AI models - GPT, Gemini, Claude - each trying to find bugs, security holes, and logic errors. They disagree with each other. That's the point.</p>
+                </div>
+                <div class="feature-row">
+                    <h3 class="feature-name">SQL Verification Ledger</h3>
+                    <p class="feature-desc">Every build, test, and lint result is <code>INSERT</code>ed into a SQLite table. The evidence bundle at the end is a <code>SELECT</code>, not prose. If the INSERT didn't happen, the verification didn't happen.</p>
+                </div>
+                <div class="feature-row">
+                    <h3 class="feature-name">Baseline Snapshots</h3>
+                    <p class="feature-desc">Before touching anything, Anvil records your project's state - build, diagnostics, tests. After changes, it compares. Regressions are caught before you see the code, not after you ship it.</p>
+                </div>
+                <div class="feature-row">
+                    <h3 class="feature-name">Pushback</h3>
+                    <p class="feature-desc">Anvil is a senior engineer, not an order taker. Bad idea? Tech debt? Dangerous edge case? It tells you before writing a single line. You can override it. But you'll know.</p>
+                </div>
+                <div class="feature-row">
+                    <h3 class="feature-name">Session Memory</h3>
+                    <p class="feature-desc">Broke a file last session? Anvil remembers. Learned your build command? Won't ask again. Context that actually persists across conversations.</p>
+                </div>
+                <div class="feature-row">
+                    <h3 class="feature-name">Git Autopilot</h3>
+                    <p class="feature-desc">Before writing code, Anvil checks your git state - stashes uncommitted work, creates a branch off <code>main</code> so you're never editing trunk directly. After verification passes, it commits with a clear message and gives you a one-line rollback command.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Evidence Bundle ────────────────────────── -->
+        <section class="section" id="how-it-works">
+            <span class="section-label">What You Actually See</span>
+            <h2 class="editorial-heading" style="margin-bottom: 0.5rem;">The Evidence Bundle.</h2>
+            <p class="editorial-intro">Every task ends with this - a structured report generated from SQL, not written by the model. Baseline vs. after. Command outputs. Exit codes. Reviewer verdicts. Confidence level. Rollback command.</p>
+
+            <div class="evidence-demo">
+                <div class="evidence-header-row">
+                    <span class="evidence-title">🔨 Anvil Evidence Bundle</span>
+                    <span class="evidence-meta">task: <code>fix-auth-redirect</code> · size: M · risk: 🟡</span>
+                </div>
+                <table class="evidence-table">
+                    <thead>
+                        <tr><th>Phase</th><th>Check</th><th>Result</th><th>Detail</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>baseline</td><td>build</td><td class="pass">✓</td><td class="cmd">npm run build</td></tr>
+                        <tr><td>baseline</td><td>tests</td><td class="pass">✓</td><td class="cmd">247 passed</td></tr>
+                        <tr><td>after</td><td>build</td><td class="pass">✓</td><td class="cmd">npm run build</td></tr>
+                        <tr><td>after</td><td>tests</td><td class="pass">✓</td><td class="cmd">249 passed (+2 new)</td></tr>
+                        <tr><td>after</td><td>diagnostics</td><td class="pass">✓</td><td class="cmd">0 errors, 0 warnings</td></tr>
+                        <tr><td>review</td><td>gpt-5.3-codex</td><td class="pass">✓</td><td class="cmd">No issues</td></tr>
+                        <tr><td>review</td><td>gemini-3-pro</td><td class="pass">✓</td><td class="cmd">No issues</td></tr>
+                        <tr><td>review</td><td>claude-opus</td><td class="pass">✓</td><td class="cmd">No issues</td></tr>
+                    </tbody>
+                </table>
+                <div class="evidence-footer">
+                    <span>Regressions: <strong>None</strong></span>
+                    <span>Confidence: <strong>High</strong></span>
+                    <span>Rollback: <code>git revert HEAD</code></span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── The Loop ──────────────────────────────── -->
+        <section class="section">
+            <span class="section-label">Under The Hood</span>
+            <h2 class="editorial-heading">Every task runs through the same loop.</h2>
+
+            <ol class="loop-list">
+                <li>
+                    <strong>Understand & Recall</strong>
+                    <span>Parses your request. Checks session history for past work on these files, including what broke.</span>
+                </li>
+                <li>
+                    <strong>Survey & Pushback</strong>
+                    <span>Searches for existing patterns to reuse. Tells you if the approach is wrong before writing code.</span>
+                </li>
+                <li>
+                    <strong>Baseline</strong>
+                    <span>Snapshots build, tests, diagnostics into the SQL ledger. This is the "before" photo.</span>
+                </li>
+                <li>
+                    <strong>Implement</strong>
+                    <span>Makes changes following your codebase patterns. Extends what's there instead of inventing new abstractions.</span>
+                </li>
+                <li>
+                    <strong>The Forge</strong>
+                    <span>Build, type check, lint, test - all recorded. Then up to 3 AI models attack the code. Issues get fixed before you see anything.</span>
+                </li>
+                <li>
+                    <strong>Evidence & Commit</strong>
+                    <span>Structured report from SQL. Auto-commit with rollback command. Done.</span>
+                </li>
+            </ol>
+        </section>
+
+        <!-- ── Install CTA ───────────────────────────── -->
+        <section class="cta-section" id="install">
+            <h2>One command.</h2>
+            <div class="install-block">
+                <div class="terminal-box" onclick="copyInstall(this)" title="Click to copy">
+                    <span class="prompt">$</span>
+                    <code>copilot agent install burkeholland/anvil</code>
+                    <button class="copy-btn" aria-label="Copy to clipboard">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                        </svg>
+                    </button>
+                </div>
+                <p class="install-hint">Then run <code>copilot</code> and select the Anvil chat mode.</p>
+            </div>
+        </section>
+
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>Built by <a href="https://postrboard.com">Burke Holland</a> · <a href="https://github.com/burkeholland/anvil">GitHub</a></p>
+        </div>
+    </footer>
+
+    <script>
+        function copyInstall(el) {
+            const code = el.querySelector('code').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                const btn = el.querySelector('.copy-btn');
+                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+                setTimeout(() => {
+                    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>
