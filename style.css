@@ -129,6 +129,34 @@ body {
     gap: 0.625rem;
 }
 
+.install-tabs {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.install-tab {
+    padding: 0.35rem 0.85rem;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 8px;
+    background: transparent;
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition: color 0.2s, background 0.2s, border-color 0.2s;
+}
+
+.install-tab:hover {
+    color: var(--text-secondary);
+}
+
+.install-tab.active {
+    background: var(--text-primary);
+    border-color: var(--text-primary);
+    color: white;
+}
+
 .terminal-box {
     display: inline-flex;
     align-items: center;
@@ -156,7 +184,7 @@ body {
     user-select: none;
 }
 
-.terminal-box code { white-space: nowrap; }
+.terminal-box code { word-break: break-all; }
 
 .terminal-box .copy-btn {
     background: none;

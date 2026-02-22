@@ -29,9 +29,23 @@
                 then has other AI models try to break it. You get proof, not promises.
             </p>
             <div class="install-block">
-                <div class="terminal-box" onclick="copyInstall(this)" title="Click to copy">
+                <div class="install-tabs">
+                    <button class="install-tab active" onclick="switchTab(this, 'local')">Local project</button>
+                    <button class="install-tab" onclick="switchTab(this, 'global')">Global</button>
+                </div>
+                <div class="terminal-box" data-tab="local" onclick="copyInstall(this)" title="Click to copy">
                     <span class="prompt">$</span>
-                    <code>copilot agent install burkeholland/anvil</code>
+                    <code>mkdir -p .copilot/agents &amp;&amp; curl -sL https://raw.githubusercontent.com/burkeholland/anvil/main/.github/agents/anvil.agent.md -o .copilot/agents/anvil.agent.md</code>
+                    <button class="copy-btn" aria-label="Copy to clipboard">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="terminal-box" data-tab="global" style="display:none" onclick="copyInstall(this)" title="Click to copy">
+                    <span class="prompt">$</span>
+                    <code>mkdir -p ~/.config/.copilot/agents &amp;&amp; curl -sL https://raw.githubusercontent.com/burkeholland/anvil/main/.github/agents/anvil.agent.md -o ~/.config/.copilot/agents/anvil.agent.md</code>
                     <button class="copy-btn" aria-label="Copy to clipboard">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -153,11 +167,25 @@
 
         <!-- ── Install CTA ───────────────────────────── -->
         <section class="cta-section" id="install">
-            <h2>One command.</h2>
+            <h2>Pick your install.</h2>
             <div class="install-block">
-                <div class="terminal-box" onclick="copyInstall(this)" title="Click to copy">
+                <div class="install-tabs">
+                    <button class="install-tab active" onclick="switchTab(this, 'local')">Local project</button>
+                    <button class="install-tab" onclick="switchTab(this, 'global')">Global</button>
+                </div>
+                <div class="terminal-box" data-tab="local" onclick="copyInstall(this)" title="Click to copy">
                     <span class="prompt">$</span>
-                    <code>copilot agent install burkeholland/anvil</code>
+                    <code>mkdir -p .copilot/agents &amp;&amp; curl -sL https://raw.githubusercontent.com/burkeholland/anvil/main/.github/agents/anvil.agent.md -o .copilot/agents/anvil.agent.md</code>
+                    <button class="copy-btn" aria-label="Copy to clipboard">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="terminal-box" data-tab="global" style="display:none" onclick="copyInstall(this)" title="Click to copy">
+                    <span class="prompt">$</span>
+                    <code>mkdir -p ~/.config/.copilot/agents &amp;&amp; curl -sL https://raw.githubusercontent.com/burkeholland/anvil/main/.github/agents/anvil.agent.md -o ~/.config/.copilot/agents/anvil.agent.md</code>
                     <button class="copy-btn" aria-label="Copy to clipboard">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -178,6 +206,15 @@
     </footer>
 
     <script>
+        function switchTab(btn, tab) {
+            const block = btn.closest('.install-block');
+            block.querySelectorAll('.install-tab').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            block.querySelectorAll('.terminal-box').forEach(box => {
+                box.style.display = box.dataset.tab === tab ? 'inline-flex' : 'none';
+            });
+        }
+
         function copyInstall(el) {
             const code = el.querySelector('code').textContent;
             navigator.clipboard.writeText(code).then(() => {
