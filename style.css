@@ -213,6 +213,23 @@ body {
     border-radius: 4px;
 }
 
+/* ── Platform Note ────────────────────────────── */
+.platform-note {
+    font-size: 0.8125rem;
+    color: var(--text-tertiary);
+}
+
+.platform-note a {
+    color: var(--text-secondary);
+    text-decoration: underline;
+    text-decoration-color: rgba(0, 0, 0, 0.15);
+    text-underline-offset: 2px;
+}
+
+.platform-note a:hover {
+    color: var(--text-primary);
+}
+
 /* ── Sections ─────────────────────────────────── */
 .section {
     padding: 4rem 0;
