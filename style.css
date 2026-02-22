@@ -184,7 +184,7 @@ body {
     user-select: none;
 }
 
-.terminal-box code { word-break: break-all; }
+.terminal-box code { white-space: nowrap; }
 
 .terminal-box .copy-btn {
     background: none;
