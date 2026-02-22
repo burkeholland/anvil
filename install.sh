@@ -6,7 +6,7 @@ FILE=".github/agents/anvil.agent.md"
 URL="https://raw.githubusercontent.com/$REPO/main/$FILE"
 
 if [ "$1" = "global" ]; then
-  DIR="$HOME/.config/.copilot/agents"
+  DIR="$HOME/.config/copilot/agents"
   echo "Installing Anvil agent globally → $DIR"
 else
   DIR=".copilot/agents"
