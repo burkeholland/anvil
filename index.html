@@ -29,13 +29,9 @@
                 then has other AI models try to break it. You get proof, not promises.
             </p>
             <div class="install-block">
-                <div class="install-tabs">
-                    <button class="install-tab active" onclick="switchTab(this, 'local')">Local project</button>
-                    <button class="install-tab" onclick="switchTab(this, 'global')">Global</button>
-                </div>
-                <div class="terminal-box" data-tab="local" data-platform="unix" onclick="copyInstall(this)" title="Click to copy">
+                <div class="terminal-box" onclick="copyInstall(this)" title="Click to copy">
                     <span class="prompt">$</span>
-                    <code>curl -sL burkeholland.github.io/anvil/install.sh | bash</code>
+                    <code>copilot plugin install burkeholland/anvil</code>
                     <button class="copy-btn" aria-label="Copy to clipboard">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -43,38 +39,7 @@
                         </svg>
                     </button>
                 </div>
-                <div class="terminal-box" data-tab="global" data-platform="unix" style="display:none" onclick="copyInstall(this)" title="Click to copy">
-                    <span class="prompt">$</span>
-                    <code>curl -sL burkeholland.github.io/anvil/install.sh | bash -s global</code>
-                    <button class="copy-btn" aria-label="Copy to clipboard">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                        </svg>
-                    </button>
-                </div>
-                <div class="terminal-box" data-tab="local" data-platform="windows" style="display:none" onclick="copyInstall(this)" title="Click to copy">
-                    <span class="prompt">&gt;</span>
-                    <code>irm https://burkeholland.github.io/anvil/install.ps1 | iex</code>
-                    <button class="copy-btn" aria-label="Copy to clipboard">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                        </svg>
-                    </button>
-                </div>
-                <div class="terminal-box" data-tab="global" data-platform="windows" style="display:none" onclick="copyInstall(this)" title="Click to copy">
-                    <span class="prompt">&gt;</span>
-                    <code>$env:ANVIL_GLOBAL=1; irm https://burkeholland.github.io/anvil/install.ps1 | iex</code>
-                    <button class="copy-btn" aria-label="Copy to clipboard">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                        </svg>
-                    </button>
-                </div>
-                <p class="platform-note"></p>
-                <p class="context-note"><strong>~5K tokens.</strong> The agent file is long because verification rules need to be explicit - vague instructions get skipped. A short prompt that hallucinates results costs more in retries than a thorough one that gets it right the first time. On a 200K context model, this is about 2.5%.</p>
+                <p class="context-note">Includes the <a href="https://github.com/upstash/context7">Context7</a> MCP server for up-to-date library docs. Run <code>bash setup.sh</code> after install to add the <a href="https://skills.sh/anthropics/skills/frontend-design">frontend-design</a> skill.</p>
             </div>
         </section>
 
@@ -188,15 +153,11 @@
 
         <!-- ── Install CTA ───────────────────────────── -->
         <section class="cta-section" id="install">
-            <h2>Pick your install.</h2>
+            <h2>One command.</h2>
             <div class="install-block">
-                <div class="install-tabs">
-                    <button class="install-tab active" onclick="switchTab(this, 'local')">Local project</button>
-                    <button class="install-tab" onclick="switchTab(this, 'global')">Global</button>
-                </div>
-                <div class="terminal-box" data-tab="local" data-platform="unix" onclick="copyInstall(this)" title="Click to copy">
+                <div class="terminal-box" onclick="copyInstall(this)" title="Click to copy">
                     <span class="prompt">$</span>
-                    <code>curl -sL burkeholland.github.io/anvil/install.sh | bash</code>
+                    <code>copilot plugin install burkeholland/anvil</code>
                     <button class="copy-btn" aria-label="Copy to clipboard">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -204,38 +165,7 @@
                         </svg>
                     </button>
                 </div>
-                <div class="terminal-box" data-tab="global" data-platform="unix" style="display:none" onclick="copyInstall(this)" title="Click to copy">
-                    <span class="prompt">$</span>
-                    <code>curl -sL burkeholland.github.io/anvil/install.sh | bash -s global</code>
-                    <button class="copy-btn" aria-label="Copy to clipboard">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                        </svg>
-                    </button>
-                </div>
-                <div class="terminal-box" data-tab="local" data-platform="windows" style="display:none" onclick="copyInstall(this)" title="Click to copy">
-                    <span class="prompt">&gt;</span>
-                    <code>irm https://burkeholland.github.io/anvil/install.ps1 | iex</code>
-                    <button class="copy-btn" aria-label="Copy to clipboard">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                        </svg>
-                    </button>
-                </div>
-                <div class="terminal-box" data-tab="global" data-platform="windows" style="display:none" onclick="copyInstall(this)" title="Click to copy">
-                    <span class="prompt">&gt;</span>
-                    <code>$env:ANVIL_GLOBAL=1; irm https://burkeholland.github.io/anvil/install.ps1 | iex</code>
-                    <button class="copy-btn" aria-label="Copy to clipboard">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                        </svg>
-                    </button>
-                </div>
-                <p class="platform-note"></p>
-                <p class="install-hint">Then run <code>copilot</code> and select the Anvil chat mode.</p>
+                <p class="install-hint">Then run <code>copilot</code> and select the Anvil agent. Run <code>bash setup.sh</code> for the frontend-design skill.</p>
             </div>
         </section>
 
@@ -248,37 +178,6 @@
     </footer>
 
     <script>
-        const isWindows = /Win/.test(navigator.userAgent);
-        let currentPlatform = isWindows ? 'windows' : 'unix';
-
-        function updateBlock(block) {
-            const tab = block.dataset.activeTab || 'local';
-            block.querySelectorAll('.terminal-box').forEach(box => {
-                box.style.display = (box.dataset.tab === tab && box.dataset.platform === currentPlatform)
-                    ? 'inline-flex' : 'none';
-            });
-            const note = block.querySelector('.platform-note');
-            if (note) {
-                note.innerHTML = currentPlatform === 'windows'
-                    ? 'Showing for <strong>Windows (PowerShell)</strong>. <a href="#" onclick="togglePlatform(event)">Switch to macOS / Linux</a>'
-                    : 'Showing for <strong>macOS / Linux</strong>. <a href="#" onclick="togglePlatform(event)">Switch to Windows</a>';
-            }
-        }
-
-        function switchTab(btn, tab) {
-            const block = btn.closest('.install-block');
-            block.querySelectorAll('.install-tab').forEach(t => t.classList.remove('active'));
-            btn.classList.add('active');
-            block.dataset.activeTab = tab;
-            updateBlock(block);
-        }
-
-        function togglePlatform(e) {
-            e.preventDefault();
-            currentPlatform = currentPlatform === 'windows' ? 'unix' : 'windows';
-            document.querySelectorAll('.install-block').forEach(updateBlock);
-        }
-
         function copyInstall(el) {
             const code = el.querySelector('code').textContent;
             navigator.clipboard.writeText(code).then(() => {
@@ -289,8 +188,6 @@
                 }, 2000);
             });
         }
-
-        document.querySelectorAll('.install-block').forEach(updateBlock);
     </script>
 </body>
 </html>

@@ -1,0 +1,15 @@
+{
+  "name": "anvil",
+  "description": "Evidence-first coding agent for GitHub Copilot CLI. Verifies every change with adversarial multi-model review, SQL-tracked verification, and automatic rollback.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Burke Holland",
+    "url": "https://postrboard.com"
+  },
+  "homepage": "https://github.com/burkeholland/anvil",
+  "repository": "https://github.com/burkeholland/anvil",
+  "license": "MIT",
+  "keywords": ["verification", "code-review", "adversarial", "evidence"],
+  "agents": "agents/",
+  "mcpServers": ".mcp.json"
+}
