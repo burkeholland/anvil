@@ -183,6 +183,7 @@ AND session_id IN (
 Normalize the request into atomic requirements and register them in `anvil_requirements`.
 Generate `requirement_id` as kebab-case slugs (`[a-z0-9-]`, for example `ui-tests-present`, `api-endpoint-wired`).
 For each requirement, define required proof signals and insert one placeholder row per check in `anvil_requirement_checks` with `passed = 0` (not yet verified).
+Initialize new requirements with `status = 'pending'`.
 
 Examples (illustrative, not exhaustive):
 - "automated UI tests" → required checks might include:
@@ -192,6 +193,28 @@ Examples (illustrative, not exhaustive):
 - "new API endpoint" → endpoint-routes-wired, auth-enforced, contract-tests-passed
 
 🚫 GATE: Do not proceed to implementation if no requirements are registered for Medium/Large tasks.
+
+### 1d. Requirement Status Lifecycle (silent - Medium and Large only)
+
+Requirement status transitions are mandatory and explicit:
+- Before working on a requirement: `pending -> in_progress`
+- After all required checks pass: `in_progress -> done` (and clear `blocked_reason`)
+- If completion is infeasible with clear justification: `in_progress -> blocked` and set `blocked_reason`
+
+Minimum SQL pattern:
+```sql
+UPDATE anvil_requirements
+SET status = 'in_progress', blocked_reason = NULL
+WHERE task_id = '{task_id}' AND requirement_id = '{requirement_id}';
+
+UPDATE anvil_requirements
+SET status = 'done', blocked_reason = NULL
+WHERE task_id = '{task_id}' AND requirement_id = '{requirement_id}';
+
+UPDATE anvil_requirements
+SET status = 'blocked', blocked_reason = '{reason}'
+WHERE task_id = '{task_id}' AND requirement_id = '{requirement_id}';
+```
 
 ### 2. Survey (silent, surface only reuse opportunities)
 
@@ -266,9 +289,10 @@ If Tier 3 is infeasible in the current environment (e.g., iOS library with no si
 **After every check**, INSERT into the ledger (Medium and Large only). **If any check fails:** fix and re-run (max 2 attempts). If you can't fix after 2 attempts, revert your changes (`git checkout HEAD -- {files}`) and INSERT the failure. Do NOT leave the user with broken code.
 
 Requirement-check synchronization (Medium and Large):
-- For each verification signal mapped to a requirement check, update the existing placeholder row in `anvil_requirement_checks` with the latest `passed`, `tool`, `command`, and `evidence_ref`.
-- If a mapped row is missing, INSERT it with `required = 1` and then update it.
-- Use one live row per `(task_id, requirement_id, check_name)`; retries overwrite the same row so stale failures do not permanently block closure.
+- Keep the existing `anvil_checks` rule unchanged: every verification step must still be INSERTed into `anvil_checks`.
+- For `anvil_requirement_checks`, use UPSERT (`INSERT ... ON CONFLICT DO UPDATE`) per `(task_id, requirement_id, check_name)` to keep one live row per check.
+- For requirement-mapped checks, the UPSERT insert-path must set `required = 1`.
+- On conflict, preserve/enforce `required = 1`, and update `passed`, `tool`, `command`, `evidence_ref`, and `ts = CURRENT_TIMESTAMP` so retries replace stale failures with the latest state.
 
 **Minimum signals:** 2 for Medium, 3 for Large. Zero verification is never acceptable.
 
@@ -392,7 +416,7 @@ SELECT ROUND(
 FROM per_requirement;
 ```
 
-Coverage counts only requirements in `done` state with all required checks passing; `blocked` requirements are excluded from coverage and therefore reduce the percentage.
+Coverage treats only `done` requirements with all required checks passing as covered; `blocked` requirements remain in the denominator and therefore reduce the percentage.
 
 #### 5f. Requirement Closure Gate (Medium and Large only)
 
