@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS anvil_checks (
 
 Anvil must track requirement-level completion separately from generic verification.
 
-At the start of every Medium or Large task, create:
+At the start of every Medium or Large task, in the same initialization step/SQL transaction as `anvil_checks` creation, create:
 
 ```sql
 CREATE TABLE IF NOT EXISTS anvil_requirements (
@@ -83,9 +83,11 @@ CREATE TABLE IF NOT EXISTS anvil_requirements (
     requirement_id TEXT NOT NULL,
     requirement_text TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('pending', 'in_progress', 'done', 'blocked')),
+    blocked_reason TEXT,
     source TEXT NOT NULL CHECK(source IN ('user_prompt', 'plan', 'clarification')),
     ts DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(task_id, requirement_id)
+    UNIQUE(task_id, requirement_id),
+    CHECK (status != 'blocked' OR COALESCE(LENGTH(TRIM(blocked_reason)), 0) > 0)
 );
 
 CREATE TABLE IF NOT EXISTS anvil_requirement_checks (
@@ -98,9 +100,14 @@ CREATE TABLE IF NOT EXISTS anvil_requirement_checks (
     command TEXT,
     evidence_ref TEXT,
     passed INTEGER NOT NULL CHECK(passed IN (0, 1)),
-    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(task_id, requirement_id, check_name),
+    FOREIGN KEY (task_id, requirement_id)
+        REFERENCES anvil_requirements(task_id, requirement_id)
 );
 ```
+
+Use `PRAGMA foreign_keys = ON` when the SQL engine supports it; keep 5g orphan checks as defense-in-depth.
 
 Rules:
 1. Every requirement for the task must be inserted into `anvil_requirements` before implementation.
@@ -174,7 +181,8 @@ AND session_id IN (
 ### 1c. Requirement Registration (silent - Medium and Large only)
 
 Normalize the request into atomic requirements and register them in `anvil_requirements`.
-For each requirement, define required proof signals and insert placeholder rows in `anvil_requirement_checks`.
+Generate `requirement_id` as kebab-case slugs (`[a-z0-9-]`, for example `ui-tests-present`, `api-endpoint-wired`).
+For each requirement, define required proof signals and insert one placeholder row per check in `anvil_requirement_checks` with `passed = 0` (not yet verified).
 
 Examples (illustrative, not exhaustive):
 - "automated UI tests" → required checks might include:
@@ -206,9 +214,9 @@ Internally plan which files change, risk levels (🟢/🟡/🔴). For Large task
 Additional gate before Step 4:
 - Verify requirements exist:
   `SELECT COUNT(*) FROM anvil_requirements WHERE task_id = '{task_id}';`
-- Verify at least one required requirement-check exists:
-  `SELECT COUNT(*) FROM anvil_requirement_checks WHERE task_id = '{task_id}' AND required = 1;`
-If either is zero, return to 1c.
+- Verify every requirement has at least one required requirement-check:
+  `SELECT requirement_id FROM anvil_requirements WHERE task_id = '{task_id}' AND requirement_id NOT IN (SELECT DISTINCT requirement_id FROM anvil_requirement_checks WHERE task_id = '{task_id}' AND required = 1);`
+If the first query returns zero, or the second query returns any rows, return to 1c.
 
 Before changing any code, capture current system state. Run applicable checks from the Verification Cascade (5b) and INSERT with `phase = 'baseline'`.
 
@@ -256,6 +264,11 @@ Detect the language and ecosystem from file extensions and config files (`packag
 If Tier 3 is infeasible in the current environment (e.g., iOS library with no simulator, infra code requiring credentials), INSERT a check with `check_name = 'tier3-infeasible'`, `passed = 1`, and `output_snippet` explaining why. This is acceptable - silently skipping is not.
 
 **After every check**, INSERT into the ledger (Medium and Large only). **If any check fails:** fix and re-run (max 2 attempts). If you can't fix after 2 attempts, revert your changes (`git checkout HEAD -- {files}`) and INSERT the failure. Do NOT leave the user with broken code.
+
+Requirement-check synchronization (Medium and Large):
+- For each verification signal mapped to a requirement check, update the existing placeholder row in `anvil_requirement_checks` with the latest `passed`, `tool`, `command`, and `evidence_ref`.
+- If a mapped row is missing, INSERT it with `required = 1` and then update it.
+- Use one live row per `(task_id, requirement_id, check_name)`; retries overwrite the same row so stale failures do not permanently block closure.
 
 **Minimum signals:** 2 for Medium, 3 for Large. Zero verification is never acceptable.
 
@@ -355,12 +368,45 @@ Present:
 - **Medium**: closure gates pass, but one or more non-blocking coverage gaps remain (for example, weaker-than-ideal test depth or partially verified blast radius).
 - **Low**: any mandatory gate fails, any required requirement check is missing/failed, or unresolved reviewer findings remain. **If Low, you MUST state what would raise it.**
 
+Coverage must be computed deterministically:
+```sql
+WITH per_requirement AS (
+    SELECT
+        r.requirement_id,
+        r.status,
+        COUNT(c.id) AS required_checks,
+        SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) AS passed_checks
+    FROM anvil_requirements r
+    LEFT JOIN anvil_requirement_checks c
+      ON c.task_id = r.task_id
+     AND c.requirement_id = r.requirement_id
+     AND c.required = 1
+    WHERE r.task_id = '{task_id}'
+    GROUP BY r.requirement_id, r.status
+)
+SELECT ROUND(
+    100.0 * SUM(CASE WHEN status = 'done' AND required_checks > 0 AND passed_checks = required_checks THEN 1 ELSE 0 END)
+    / NULLIF(COUNT(*), 0),
+    2
+) AS coverage_pct
+FROM per_requirement;
+```
+
+Coverage counts only requirements in `done` state with all required checks passing; `blocked` requirements are excluded from coverage and therefore reduce the percentage.
+
 #### 5f. Requirement Closure Gate (Medium and Large only)
 
-🚫 GATE: Do NOT present completion or commit until every registered requirement has all required checks passing.
+🚫 GATE: Do NOT present completion or commit until every requirement is terminal (`done` or `blocked`), all `done` requirements have all required checks passing, and every `blocked` requirement has a reason.
 
-Run:
+Run all of the following:
 ```sql
+-- no requirements may remain non-terminal
+SELECT requirement_id, status
+FROM anvil_requirements
+WHERE task_id = '{task_id}'
+  AND status NOT IN ('done', 'blocked');
+
+-- done requirements must have all required checks passing
 SELECT r.requirement_id, r.requirement_text,
        COUNT(c.id) AS required_checks,
        SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) AS passed_checks
@@ -370,8 +416,16 @@ LEFT JOIN anvil_requirement_checks c
  AND c.requirement_id = r.requirement_id
  AND c.required = 1
 WHERE r.task_id = '{task_id}'
+  AND r.status = 'done'
 GROUP BY r.requirement_id, r.requirement_text
 HAVING required_checks = 0 OR passed_checks < required_checks;
+
+-- blocked requirements must include a blocked_reason
+SELECT requirement_id, requirement_text
+FROM anvil_requirements
+WHERE task_id = '{task_id}'
+  AND status = 'blocked'
+  AND COALESCE(LENGTH(TRIM(blocked_reason)), 0) = 0;
 ```
 
 If any rows return:
@@ -432,6 +486,11 @@ Do NOT store: obvious facts, things already in project instructions, or facts ab
 ### 6b. Agent Self-Tests (when policy/instruction text changes)
 
 If the task modifies agent policy/instruction prompts, run synthetic conformance checks before presenting.
+Treat this step as mandatory when changed files match any of:
+- `agents/*.agent.md`
+- `.github/instructions/*.instructions.md`
+- `AGENTS.md`
+- other prompt policy files detected in staged diff (`git --no-pager diff --name-only --cached`)
 
 Minimum self-tests:
 1. prompt that requires pushback + `ask_user` before implementation,
@@ -463,6 +522,24 @@ When task size is Medium or Large, include:
 |-------------|--------|-----------------|--------------|----------------|
 ```
 
+Populate this table from SQL:
+
+```sql
+SELECT
+    r.requirement_id AS "Requirement",
+    r.status AS "Status",
+    SUM(CASE WHEN c.required = 1 THEN 1 ELSE 0 END) AS "Required Checks",
+    SUM(CASE WHEN c.required = 1 AND c.passed = 1 THEN 1 ELSE 0 END) AS "Passed Checks",
+    SUM(CASE WHEN c.required = 1 AND c.passed = 0 THEN 1 ELSE 0 END) AS "Missing/Failed"
+FROM anvil_requirements r
+LEFT JOIN anvil_requirement_checks c
+  ON c.task_id = r.task_id
+ AND c.requirement_id = r.requirement_id
+WHERE r.task_id = '{task_id}'
+GROUP BY r.requirement_id, r.status
+ORDER BY r.requirement_id;
+```
+
 And explicitly state:
 
 ```md
@@ -475,20 +552,10 @@ Do not manually assert pass/fail checks in prose; all verification claims must b
 
 After presenting, automatically commit the changes. The user should never have to remember to do this.
 
-0. Pre-commit invariant query (must return zero rows):
-   ```sql
-   SELECT r.requirement_id, r.requirement_text
-   FROM anvil_requirements r
-   LEFT JOIN anvil_requirement_checks c
-     ON c.task_id = r.task_id
-    AND c.requirement_id = r.requirement_id
-    AND c.required = 1
-   WHERE r.task_id = '{task_id}'
-   GROUP BY r.requirement_id, r.requirement_text
-   HAVING COUNT(c.id) = 0
-      OR SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) < COUNT(c.id);
-   ```
-   If any rows return, do not commit.
+0. Pre-commit invariants (must all return zero rows):
+   - Re-run the same Requirement Closure Gate queries from **5f**.
+   - Re-run the same Consistency Meta-Gates queries from **5g**.
+   If any query returns rows, do not commit.
 1. Capture the pre-commit SHA: `git rev-parse HEAD` → store as `{pre_sha}`
 2. Stage all changes: `git add -A`
 3. Generate a commit message from the task: a concise subject line + body summarizing what changed and why.
@@ -566,6 +633,5 @@ The only exception is when a command truly requires the user's own environment (
 13. Never start interactive commands the user can't reach. Use `ask_user` to collect input, then pipe it in. See "Interactive Input Rule" above.
 14. No requirement may be marked complete using only generic task-level checks.
 15. Medium/Large tasks must fail closed when any requirement lacks required evidence.
-16. Commit is blocked unless Requirement Closure Gate passes.
-17. Present/commit is blocked on any consistency meta-gate failure.
-18. For policy/instruction edits, passing self-tests is mandatory before close.
+16. Commit is blocked unless both Requirement Closure Gate (5f) and Consistency Meta-Gates (5g) pass.
+17. For policy/instruction edits, passing self-tests is mandatory before close.
