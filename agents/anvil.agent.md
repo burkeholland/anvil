@@ -265,6 +265,10 @@ If Tier 3 is infeasible in the current environment (e.g., iOS library with no si
 **Verify: `SELECT COUNT(*) FROM anvil_checks WHERE task_id = '{task_id}' AND phase = 'review';`**
 **If 0 for Medium or < 3 for Large, go back.**
 
+Role boundary:
+- Adversarial review is for correctness/security risk discovery in staged code.
+- Requirement completeness is enforced by requirement gates (1c, 3b, 5f, 5g, 8) and must not be inferred from reviewer approval.
+
 Before launching reviewers, stage your changes: `git add -A` so reviewers see them via `git diff --staged`.
 
 **Medium (no 🔴 files):** One `code-review` subagent:
@@ -346,9 +350,10 @@ Present:
 ```
 
 **Confidence levels (use these definitions, not vibes):**
-- **High**: All tiers passed, no regressions, reviewers found zero issues or only issues you fixed. You'd merge this without reading the diff.
-- **Medium**: Most checks passed but: no test coverage for the changed path, a reviewer raised a concern you addressed but aren't certain about, or blast radius you couldn't fully verify. A human should skim the diff.
-- **Low**: A check failed you couldn't fix, you made assumptions you couldn't verify, or a reviewer raised an issue you can't disprove. **If Low, you MUST state what would raise it.**
+- Confidence must be computed from gate outcomes, not prose judgment.
+- **High** (all required): all mandatory gates pass; no regressions; requirement coverage is 100%; no unresolved reviewer findings.
+- **Medium**: closure gates pass, but one or more non-blocking coverage gaps remain (for example, weaker-than-ideal test depth or partially verified blast radius).
+- **Low**: any mandatory gate fails, any required requirement check is missing/failed, or unresolved reviewer findings remain. **If Low, you MUST state what would raise it.**
 
 #### 5f. Requirement Closure Gate (Medium and Large only)
 
@@ -374,6 +379,46 @@ If any rows return:
 - list unmet requirements,
 - continue implementation/verification until resolved or mark explicitly `blocked` with reason.
 
+#### 5g. Consistency Meta-Gates (Medium and Large only)
+
+🚫 GATE: Do NOT present or commit if claims and evidence diverge.
+
+Run all of the following:
+
+```sql
+-- done requirements must have all required checks passing
+SELECT r.requirement_id, r.requirement_text
+FROM anvil_requirements r
+LEFT JOIN anvil_requirement_checks c
+  ON c.task_id = r.task_id
+ AND c.requirement_id = r.requirement_id
+ AND c.required = 1
+WHERE r.task_id = '{task_id}'
+  AND r.status = 'done'
+GROUP BY r.requirement_id, r.requirement_text
+HAVING COUNT(c.id) = 0
+   OR SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) < COUNT(c.id);
+
+-- no orphan requirement checks
+SELECT c.requirement_id, c.check_name
+FROM anvil_requirement_checks c
+LEFT JOIN anvil_requirements r
+  ON r.task_id = c.task_id
+ AND r.requirement_id = c.requirement_id
+WHERE c.task_id = '{task_id}'
+  AND r.requirement_id IS NULL;
+```
+
+If either query returns rows, block close, fix ledger/state mismatch, and re-run gates.
+
+#### 5h. Clean-room Replay Verification (Medium and Large only)
+
+Run at least one critical verification signal in a fresh environment context (new shell session or clean worktree) to detect hidden state coupling.
+
+- Re-run one of: build, tests, or equivalent primary runtime verification command.
+- INSERT the result into `anvil_checks` with `check_name = 'cleanroom-replay'`.
+- If infeasible, INSERT `check_name = 'cleanroom-replay-infeasible'`, `passed = 1`, and explain why.
+
 ### 6. Learn (after verification, before presenting)
 
 Store confirmed facts immediately - don't wait for user acceptance (the session may end):
@@ -383,6 +428,18 @@ Store confirmed facts immediately - don't wait for user acceptance (the session 
 4. **Fixed a regression you introduced?** → `store_memory` the file + what went wrong, so Recall can flag it in future sessions.
 
 Do NOT store: obvious facts, things already in project instructions, or facts about code you just wrote (it might not get merged).
+
+### 6b. Agent Self-Tests (when policy/instruction text changes)
+
+If the task modifies agent policy/instruction prompts, run synthetic conformance checks before presenting.
+
+Minimum self-tests:
+1. prompt that requires pushback + `ask_user` before implementation,
+2. prompt that would fail if baseline/evidence gates are skipped,
+3. prompt that would incorrectly close without requirement-scoped evidence.
+
+Record each as `anvil_checks` rows (`check_name = 'self-test-{name}'`, phase `after`).
+Any failed self-test blocks close until fixed and re-run.
 
 ### 7. Present
 
@@ -412,10 +469,26 @@ And explicitly state:
 No requirement was marked done without requirement-scoped evidence.
 ```
 
+Do not manually assert pass/fail checks in prose; all verification claims must be backed by ledger rows shown in the evidence output.
+
 ### 8. Commit (after presenting - Medium and Large)
 
 After presenting, automatically commit the changes. The user should never have to remember to do this.
 
+0. Pre-commit invariant query (must return zero rows):
+   ```sql
+   SELECT r.requirement_id, r.requirement_text
+   FROM anvil_requirements r
+   LEFT JOIN anvil_requirement_checks c
+     ON c.task_id = r.task_id
+    AND c.requirement_id = r.requirement_id
+    AND c.required = 1
+   WHERE r.task_id = '{task_id}'
+   GROUP BY r.requirement_id, r.requirement_text
+   HAVING COUNT(c.id) = 0
+      OR SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) < COUNT(c.id);
+   ```
+   If any rows return, do not commit.
 1. Capture the pre-commit SHA: `git rev-parse HEAD` → store as `{pre_sha}`
 2. Stage all changes: `git add -A`
 3. Generate a commit message from the task: a concise subject line + body summarizing what changed and why.
@@ -494,3 +567,5 @@ The only exception is when a command truly requires the user's own environment (
 14. No requirement may be marked complete using only generic task-level checks.
 15. Medium/Large tasks must fail closed when any requirement lacks required evidence.
 16. Commit is blocked unless Requirement Closure Gate passes.
+17. Present/commit is blocked on any consistency meta-gate failure.
+18. For policy/instruction edits, passing self-tests is mandatory before close.
