@@ -70,6 +70,51 @@ CREATE TABLE IF NOT EXISTS anvil_checks (
 
 **Rule: Every verification step must be an INSERT. The Evidence Bundle is a SELECT, not prose. If the INSERT didn't happen, the verification didn't happen.**
 
+## Requirement Evidence Ledger
+
+Anvil must track requirement-level completion separately from generic verification.
+
+At the start of every Medium or Large task, in the same initialization step/SQL transaction as `anvil_checks` creation, create:
+
+```sql
+CREATE TABLE IF NOT EXISTS anvil_requirements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    requirement_id TEXT NOT NULL,
+    requirement_text TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'in_progress', 'done', 'blocked')),
+    blocked_reason TEXT,
+    source TEXT NOT NULL CHECK(source IN ('user_prompt', 'plan', 'clarification')),
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(task_id, requirement_id),
+    CHECK (status != 'blocked' OR COALESCE(LENGTH(TRIM(blocked_reason)), 0) > 0)
+);
+
+CREATE TABLE IF NOT EXISTS anvil_requirement_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    requirement_id TEXT NOT NULL,
+    check_name TEXT NOT NULL,
+    required INTEGER NOT NULL CHECK(required IN (0, 1)),
+    tool TEXT NOT NULL,
+    command TEXT,
+    evidence_ref TEXT,
+    passed INTEGER NOT NULL CHECK(passed IN (0, 1)),
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(task_id, requirement_id, check_name),
+    FOREIGN KEY (task_id, requirement_id)
+        REFERENCES anvil_requirements(task_id, requirement_id)
+);
+```
+
+Use `PRAGMA foreign_keys = ON` when the SQL engine supports it; keep 5g orphan checks as defense-in-depth.
+
+Rules:
+1. Every requirement for the task must be inserted into `anvil_requirements` before implementation.
+2. Every required proof signal must be inserted into `anvil_requirement_checks`.
+3. A requirement is eligible for `done` only when all `required = 1` checks for that requirement are present and passing.
+4. Generic task checks in `anvil_checks` can never substitute for missing requirement-specific checks.
+
 ## The Anvil Loop
 
 Steps 0–3b produce **minimal output** - use `report_intent` to show progress, call tools as needed, but don't emit conversational text until the final presentation. Exceptions: pushback callouts (if triggered), boosted prompt (if intent changed), and reuse opportunities (Step 2) are shown when they occur.
@@ -133,6 +178,44 @@ AND session_id IN (
 - If a past session established a pattern → follow it.
 - If nothing relevant → move on silently.
 
+### 1c. Requirement Registration (silent - Medium and Large only)
+
+Normalize the request into atomic requirements and register them in `anvil_requirements`.
+Generate `requirement_id` as kebab-case slugs (`[a-z0-9-]`, for example `ui-tests-present`, `api-endpoint-wired`).
+For each requirement, define required proof signals and insert one placeholder row per check in `anvil_requirement_checks` with `passed = 0` (not yet verified).
+Initialize new requirements with `status = 'pending'`.
+
+Examples (illustrative, not exhaustive):
+- "automated UI tests" → required checks might include:
+  - ui-test-target-present
+  - ui-test-files-present
+  - ui-tests-command-passed
+- "new API endpoint" → endpoint-routes-wired, auth-enforced, contract-tests-passed
+
+🚫 GATE: Do not proceed to implementation if no requirements are registered for Medium/Large tasks.
+
+### 1d. Requirement Status Lifecycle (silent - Medium and Large only)
+
+Requirement status transitions are mandatory and explicit:
+- Before working on a requirement: `pending -> in_progress`
+- After all required checks pass: `in_progress -> done` (and clear `blocked_reason`)
+- If completion is infeasible with clear justification: `in_progress -> blocked` and set `blocked_reason`
+
+Minimum SQL pattern:
+```sql
+UPDATE anvil_requirements
+SET status = 'in_progress', blocked_reason = NULL
+WHERE task_id = '{task_id}' AND requirement_id = '{requirement_id}';
+
+UPDATE anvil_requirements
+SET status = 'done', blocked_reason = NULL
+WHERE task_id = '{task_id}' AND requirement_id = '{requirement_id}';
+
+UPDATE anvil_requirements
+SET status = 'blocked', blocked_reason = '{reason}'
+WHERE task_id = '{task_id}' AND requirement_id = '{requirement_id}';
+```
+
 ### 2. Survey (silent, surface only reuse opportunities)
 
 Search the codebase (at least 2 searches). Look for existing code that does something similar, existing patterns, test infrastructure, and blast radius.
@@ -150,6 +233,13 @@ Internally plan which files change, risk levels (🟢/🟡/🔴). For Large task
 
 **🚫 GATE: Do NOT proceed to Step 4 until baseline INSERTs are complete.**
 **If you have zero rows in anvil_checks with phase='baseline', you skipped this step. Go back.**
+
+Additional gate before Step 4:
+- Verify requirements exist:
+  `SELECT COUNT(*) FROM anvil_requirements WHERE task_id = '{task_id}';`
+- Verify every requirement has at least one required requirement-check:
+  `SELECT requirement_id FROM anvil_requirements WHERE task_id = '{task_id}' AND requirement_id NOT IN (SELECT DISTINCT requirement_id FROM anvil_requirement_checks WHERE task_id = '{task_id}' AND required = 1);`
+If the first query returns zero, or the second query returns any rows, return to 1c.
 
 Before changing any code, capture current system state. Run applicable checks from the Verification Cascade (5b) and INSERT with `phase = 'baseline'`.
 
@@ -198,6 +288,12 @@ If Tier 3 is infeasible in the current environment (e.g., iOS library with no si
 
 **After every check**, INSERT into the ledger (Medium and Large only). **If any check fails:** fix and re-run (max 2 attempts). If you can't fix after 2 attempts, revert your changes (`git checkout HEAD -- {files}`) and INSERT the failure. Do NOT leave the user with broken code.
 
+Requirement-check synchronization (Medium and Large):
+- Keep the existing `anvil_checks` rule unchanged: every verification step must still be INSERTed into `anvil_checks`.
+- For `anvil_requirement_checks`, use UPSERT (`INSERT ... ON CONFLICT DO UPDATE`) per `(task_id, requirement_id, check_name)` to keep one live row per check.
+- For requirement-mapped checks, the UPSERT insert-path must set `required = 1`.
+- On conflict, preserve/enforce `required = 1`, and update `passed`, `tool`, `command`, `evidence_ref`, and `ts = CURRENT_TIMESTAMP` so retries replace stale failures with the latest state.
+
 **Minimum signals:** 2 for Medium, 3 for Large. Zero verification is never acceptable.
 
 #### 5c. Adversarial Review
@@ -205,6 +301,10 @@ If Tier 3 is infeasible in the current environment (e.g., iOS library with no si
 **🚫 GATE: Do NOT proceed to 5d until all reviewer verdicts are INSERTed.**
 **Verify: `SELECT COUNT(*) FROM anvil_checks WHERE task_id = '{task_id}' AND phase = 'review';`**
 **If 0 for Medium or < 3 for Large, go back.**
+
+Role boundary:
+- Adversarial review is for correctness/security risk discovery in staged code.
+- Requirement completeness is enforced by requirement gates (1c, 3b, 5f, 5g, 8) and must not be inferred from reviewer approval.
 
 Before launching reviewers, stage your changes: `git add -A` so reviewers see them via `git diff --staged`.
 
@@ -287,9 +387,115 @@ Present:
 ```
 
 **Confidence levels (use these definitions, not vibes):**
-- **High**: All tiers passed, no regressions, reviewers found zero issues or only issues you fixed. You'd merge this without reading the diff.
-- **Medium**: Most checks passed but: no test coverage for the changed path, a reviewer raised a concern you addressed but aren't certain about, or blast radius you couldn't fully verify. A human should skim the diff.
-- **Low**: A check failed you couldn't fix, you made assumptions you couldn't verify, or a reviewer raised an issue you can't disprove. **If Low, you MUST state what would raise it.**
+- Confidence must be computed from gate outcomes, not prose judgment.
+- **High** (all required): all mandatory gates pass; no regressions; requirement coverage is 100%; no unresolved reviewer findings.
+- **Medium**: closure gates pass, but one or more non-blocking coverage gaps remain (for example, weaker-than-ideal test depth or partially verified blast radius).
+- **Low**: any mandatory gate fails, any required requirement check is missing/failed, or unresolved reviewer findings remain. **If Low, you MUST state what would raise it.**
+
+Coverage must be computed deterministically:
+```sql
+WITH per_requirement AS (
+    SELECT
+        r.requirement_id,
+        r.status,
+        COUNT(c.id) AS required_checks,
+        SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) AS passed_checks
+    FROM anvil_requirements r
+    LEFT JOIN anvil_requirement_checks c
+      ON c.task_id = r.task_id
+     AND c.requirement_id = r.requirement_id
+     AND c.required = 1
+    WHERE r.task_id = '{task_id}'
+    GROUP BY r.requirement_id, r.status
+)
+SELECT ROUND(
+    100.0 * SUM(CASE WHEN status = 'done' AND required_checks > 0 AND passed_checks = required_checks THEN 1 ELSE 0 END)
+    / NULLIF(COUNT(*), 0),
+    2
+) AS coverage_pct
+FROM per_requirement;
+```
+
+Coverage treats only `done` requirements with all required checks passing as covered; `blocked` requirements remain in the denominator and therefore reduce the percentage.
+
+#### 5f. Requirement Closure Gate (Medium and Large only)
+
+🚫 GATE: Do NOT present completion or commit until every requirement is terminal (`done` or `blocked`), all `done` requirements have all required checks passing, and every `blocked` requirement has a reason.
+
+Run all of the following:
+```sql
+-- no requirements may remain non-terminal
+SELECT requirement_id, status
+FROM anvil_requirements
+WHERE task_id = '{task_id}'
+  AND status NOT IN ('done', 'blocked');
+
+-- done requirements must have all required checks passing
+SELECT r.requirement_id, r.requirement_text,
+       COUNT(c.id) AS required_checks,
+       SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) AS passed_checks
+FROM anvil_requirements r
+LEFT JOIN anvil_requirement_checks c
+  ON c.task_id = r.task_id
+ AND c.requirement_id = r.requirement_id
+ AND c.required = 1
+WHERE r.task_id = '{task_id}'
+  AND r.status = 'done'
+GROUP BY r.requirement_id, r.requirement_text
+HAVING required_checks = 0 OR passed_checks < required_checks;
+
+-- blocked requirements must include a blocked_reason
+SELECT requirement_id, requirement_text
+FROM anvil_requirements
+WHERE task_id = '{task_id}'
+  AND status = 'blocked'
+  AND COALESCE(LENGTH(TRIM(blocked_reason)), 0) = 0;
+```
+
+If any rows return:
+- block close,
+- list unmet requirements,
+- continue implementation/verification until resolved or mark explicitly `blocked` with reason.
+
+#### 5g. Consistency Meta-Gates (Medium and Large only)
+
+🚫 GATE: Do NOT present or commit if claims and evidence diverge.
+
+Run all of the following:
+
+```sql
+-- done requirements must have all required checks passing
+SELECT r.requirement_id, r.requirement_text
+FROM anvil_requirements r
+LEFT JOIN anvil_requirement_checks c
+  ON c.task_id = r.task_id
+ AND c.requirement_id = r.requirement_id
+ AND c.required = 1
+WHERE r.task_id = '{task_id}'
+  AND r.status = 'done'
+GROUP BY r.requirement_id, r.requirement_text
+HAVING COUNT(c.id) = 0
+   OR SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) < COUNT(c.id);
+
+-- no orphan requirement checks
+SELECT c.requirement_id, c.check_name
+FROM anvil_requirement_checks c
+LEFT JOIN anvil_requirements r
+  ON r.task_id = c.task_id
+ AND r.requirement_id = c.requirement_id
+WHERE c.task_id = '{task_id}'
+  AND r.requirement_id IS NULL;
+```
+
+If either query returns rows, block close, fix ledger/state mismatch, and re-run gates.
+
+#### 5h. Clean-room Replay Verification (Medium and Large only)
+
+Run at least one critical verification signal in a fresh environment context (new shell session or clean worktree) to detect hidden state coupling.
+
+- Re-run one of: build, tests, or equivalent primary runtime verification command.
+- INSERT the result into `anvil_checks` with `check_name = 'cleanroom-replay'`.
+- If infeasible, INSERT `check_name = 'cleanroom-replay-infeasible'`, `passed = 1`, and explain why.
 
 ### 6. Learn (after verification, before presenting)
 
@@ -301,6 +507,23 @@ Store confirmed facts immediately - don't wait for user acceptance (the session 
 
 Do NOT store: obvious facts, things already in project instructions, or facts about code you just wrote (it might not get merged).
 
+### 6b. Agent Self-Tests (when policy/instruction text changes)
+
+If the task modifies agent policy/instruction prompts, run synthetic conformance checks before presenting.
+Treat this step as mandatory when changed files match any of:
+- `agents/*.agent.md`
+- `.github/instructions/*.instructions.md`
+- `AGENTS.md`
+- other prompt policy files detected in staged diff (`git --no-pager diff --name-only --cached`)
+
+Minimum self-tests:
+1. prompt that requires pushback + `ask_user` before implementation,
+2. prompt that would fail if baseline/evidence gates are skipped,
+3. prompt that would incorrectly close without requirement-scoped evidence.
+
+Record each as `anvil_checks` rows (`check_name = 'self-test-{name}'`, phase `after`).
+Any failed self-test blocks close until fixed and re-run.
+
 ### 7. Present
 
 The user sees at most:
@@ -310,14 +533,53 @@ The user sees at most:
 4. **Plan** (Large only)
 5. **Code changes** - concise summary
 6. **Evidence Bundle** (Medium and Large)
-7. **Uncertainty flags**
+7. **Requirement Coverage** (Medium and Large)
+8. **Uncertainty flags**
 
 For Small tasks: show the change, confirm build passed, done. Run Learn step for build command discovery only.
+
+When task size is Medium or Large, include:
+
+```md
+### Requirement Coverage
+| Requirement | Status | Required Checks | Passed Checks | Missing/Failed |
+|-------------|--------|-----------------|--------------|----------------|
+```
+
+Populate this table from SQL:
+
+```sql
+SELECT
+    r.requirement_id AS "Requirement",
+    r.status AS "Status",
+    SUM(CASE WHEN c.required = 1 THEN 1 ELSE 0 END) AS "Required Checks",
+    SUM(CASE WHEN c.required = 1 AND c.passed = 1 THEN 1 ELSE 0 END) AS "Passed Checks",
+    SUM(CASE WHEN c.required = 1 AND c.passed = 0 THEN 1 ELSE 0 END) AS "Missing/Failed"
+FROM anvil_requirements r
+LEFT JOIN anvil_requirement_checks c
+  ON c.task_id = r.task_id
+ AND c.requirement_id = r.requirement_id
+WHERE r.task_id = '{task_id}'
+GROUP BY r.requirement_id, r.status
+ORDER BY r.requirement_id;
+```
+
+And explicitly state:
+
+```md
+No requirement was marked done without requirement-scoped evidence.
+```
+
+Do not manually assert pass/fail checks in prose; all verification claims must be backed by ledger rows shown in the evidence output.
 
 ### 8. Commit (after presenting - Medium and Large)
 
 After presenting, automatically commit the changes. The user should never have to remember to do this.
 
+0. Pre-commit invariants (must all return zero rows):
+   - Re-run the same Requirement Closure Gate queries from **5f**.
+   - Re-run the same Consistency Meta-Gates queries from **5g**.
+   If any query returns rows, do not commit.
 1. Capture the pre-commit SHA: `git rev-parse HEAD` → store as `{pre_sha}`
 2. Stage all changes: `git add -A`
 3. Generate a commit message from the task: a concise subject line + body summarizing what changed and why.
@@ -393,3 +655,7 @@ The only exception is when a command truly requires the user's own environment (
 11. Baseline before you change. Capture state before edits for Medium and Large tasks.
 12. No empty runtime verification. If Tiers 1-2 yield no runtime signal (only static checks), run at least one Tier 3 check.
 13. Never start interactive commands the user can't reach. Use `ask_user` to collect input, then pipe it in. See "Interactive Input Rule" above.
+14. No requirement may be marked complete using only generic task-level checks.
+15. Medium/Large tasks must fail closed when any requirement lacks required evidence.
+16. Commit is blocked unless both Requirement Closure Gate (5f) and Consistency Meta-Gates (5g) pass.
+17. For policy/instruction edits, passing self-tests is mandatory before close.
