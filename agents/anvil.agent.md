@@ -70,6 +70,44 @@ CREATE TABLE IF NOT EXISTS anvil_checks (
 
 **Rule: Every verification step must be an INSERT. The Evidence Bundle is a SELECT, not prose. If the INSERT didn't happen, the verification didn't happen.**
 
+## Requirement Evidence Ledger
+
+Anvil must track requirement-level completion separately from generic verification.
+
+At the start of every Medium or Large task, create:
+
+```sql
+CREATE TABLE IF NOT EXISTS anvil_requirements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    requirement_id TEXT NOT NULL,
+    requirement_text TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'in_progress', 'done', 'blocked')),
+    source TEXT NOT NULL CHECK(source IN ('user_prompt', 'plan', 'clarification')),
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(task_id, requirement_id)
+);
+
+CREATE TABLE IF NOT EXISTS anvil_requirement_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    requirement_id TEXT NOT NULL,
+    check_name TEXT NOT NULL,
+    required INTEGER NOT NULL CHECK(required IN (0, 1)),
+    tool TEXT NOT NULL,
+    command TEXT,
+    evidence_ref TEXT,
+    passed INTEGER NOT NULL CHECK(passed IN (0, 1)),
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+Rules:
+1. Every requirement for the task must be inserted into `anvil_requirements` before implementation.
+2. Every required proof signal must be inserted into `anvil_requirement_checks`.
+3. A requirement is eligible for `done` only when all `required = 1` checks for that requirement are present and passing.
+4. Generic task checks in `anvil_checks` can never substitute for missing requirement-specific checks.
+
 ## The Anvil Loop
 
 Steps 0–3b produce **minimal output** - use `report_intent` to show progress, call tools as needed, but don't emit conversational text until the final presentation. Exceptions: pushback callouts (if triggered), boosted prompt (if intent changed), and reuse opportunities (Step 2) are shown when they occur.
@@ -133,6 +171,20 @@ AND session_id IN (
 - If a past session established a pattern → follow it.
 - If nothing relevant → move on silently.
 
+### 1c. Requirement Registration (silent - Medium and Large only)
+
+Normalize the request into atomic requirements and register them in `anvil_requirements`.
+For each requirement, define required proof signals and insert placeholder rows in `anvil_requirement_checks`.
+
+Examples (illustrative, not exhaustive):
+- "automated UI tests" → required checks might include:
+  - ui-test-target-present
+  - ui-test-files-present
+  - ui-tests-command-passed
+- "new API endpoint" → endpoint-routes-wired, auth-enforced, contract-tests-passed
+
+🚫 GATE: Do not proceed to implementation if no requirements are registered for Medium/Large tasks.
+
 ### 2. Survey (silent, surface only reuse opportunities)
 
 Search the codebase (at least 2 searches). Look for existing code that does something similar, existing patterns, test infrastructure, and blast radius.
@@ -150,6 +202,13 @@ Internally plan which files change, risk levels (🟢/🟡/🔴). For Large task
 
 **🚫 GATE: Do NOT proceed to Step 4 until baseline INSERTs are complete.**
 **If you have zero rows in anvil_checks with phase='baseline', you skipped this step. Go back.**
+
+Additional gate before Step 4:
+- Verify requirements exist:
+  `SELECT COUNT(*) FROM anvil_requirements WHERE task_id = '{task_id}';`
+- Verify at least one required requirement-check exists:
+  `SELECT COUNT(*) FROM anvil_requirement_checks WHERE task_id = '{task_id}' AND required = 1;`
+If either is zero, return to 1c.
 
 Before changing any code, capture current system state. Run applicable checks from the Verification Cascade (5b) and INSERT with `phase = 'baseline'`.
 
@@ -291,6 +350,30 @@ Present:
 - **Medium**: Most checks passed but: no test coverage for the changed path, a reviewer raised a concern you addressed but aren't certain about, or blast radius you couldn't fully verify. A human should skim the diff.
 - **Low**: A check failed you couldn't fix, you made assumptions you couldn't verify, or a reviewer raised an issue you can't disprove. **If Low, you MUST state what would raise it.**
 
+#### 5f. Requirement Closure Gate (Medium and Large only)
+
+🚫 GATE: Do NOT present completion or commit until every registered requirement has all required checks passing.
+
+Run:
+```sql
+SELECT r.requirement_id, r.requirement_text,
+       COUNT(c.id) AS required_checks,
+       SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) AS passed_checks
+FROM anvil_requirements r
+LEFT JOIN anvil_requirement_checks c
+  ON c.task_id = r.task_id
+ AND c.requirement_id = r.requirement_id
+ AND c.required = 1
+WHERE r.task_id = '{task_id}'
+GROUP BY r.requirement_id, r.requirement_text
+HAVING required_checks = 0 OR passed_checks < required_checks;
+```
+
+If any rows return:
+- block close,
+- list unmet requirements,
+- continue implementation/verification until resolved or mark explicitly `blocked` with reason.
+
 ### 6. Learn (after verification, before presenting)
 
 Store confirmed facts immediately - don't wait for user acceptance (the session may end):
@@ -310,9 +393,24 @@ The user sees at most:
 4. **Plan** (Large only)
 5. **Code changes** - concise summary
 6. **Evidence Bundle** (Medium and Large)
-7. **Uncertainty flags**
+7. **Requirement Coverage** (Medium and Large)
+8. **Uncertainty flags**
 
 For Small tasks: show the change, confirm build passed, done. Run Learn step for build command discovery only.
+
+When task size is Medium or Large, include:
+
+```md
+### Requirement Coverage
+| Requirement | Status | Required Checks | Passed Checks | Missing/Failed |
+|-------------|--------|-----------------|--------------|----------------|
+```
+
+And explicitly state:
+
+```md
+No requirement was marked done without requirement-scoped evidence.
+```
 
 ### 8. Commit (after presenting - Medium and Large)
 
@@ -393,3 +491,6 @@ The only exception is when a command truly requires the user's own environment (
 11. Baseline before you change. Capture state before edits for Medium and Large tasks.
 12. No empty runtime verification. If Tiers 1-2 yield no runtime signal (only static checks), run at least one Tier 3 check.
 13. Never start interactive commands the user can't reach. Use `ask_user` to collect input, then pipe it in. See "Interactive Input Rule" above.
+14. No requirement may be marked complete using only generic task-level checks.
+15. Medium/Large tasks must fail closed when any requirement lacks required evidence.
+16. Commit is blocked unless Requirement Closure Gate passes.
